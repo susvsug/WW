@@ -20,7 +20,14 @@ class MyBot(commands.Bot):
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name} ({self.user.id})')
-        # سنعتمد الآن على الأمر اليدوي !sync لضمان المزامنة القسرية وتجنب تعليق الكاش عند تشغيل البوت
+        try:
+            # مزامنة ذكية ومباشرة للسيرفر الخاص بك فور تشغيل البوت دون مسح معقد
+            guild = discord.Object(id=YOUR_GUILD_ID)
+            self.tree.copy_global_to(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            print(f"✅ Synced {len(synced)} command(s) instantly to guild {YOUR_GUILD_ID}")
+        except Exception as e:
+            print(f"❌ Failed to sync commands: {e}")
 
 bot = MyBot()
 
@@ -34,31 +41,6 @@ def is_booster(interaction: discord.Interaction) -> bool:
         if "booster" in role.name.lower() or "boost" in role.name.lower() or role.is_premium_subscriber():
             return True
     return False
-
-# --- أمر قوي جداً للمزامنة وتنظيف كاش ديسكورد ---
-# اكتب في الشات: !sync
-@bot.command(name="sync")
-async def sync_commands(ctx):
-    # التأكد من أن منفذ الأمر هو صاحب السيرفر أو لديه صلاحيات الإدارة الكاملة
-    if not ctx.author.guild_permissions.administrator:
-        await ctx.send("❌ هذا الأمر مخصص للإدارة فقط!")
-        return
-
-    await ctx.send("⏳ جاري تنظيف الكاش وإعادة مزامنة الأوامر الثمانية بالكامل، يرجى الانتظار...")
-    try:
-        guild = discord.Object(id=YOUR_GUILD_ID)
-        
-        # 1. مسح الأوامر القديمة المسجلة محلياً في السيرفر أولاً لتنظيف الذاكرة
-        bot.tree.clear_commands(guild=guild)
-        await bot.tree.sync(guild=guild)
-        
-        # 2. نسخ الأوامر الجديدة وتسجيلها مجدداً
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        
-        await ctx.send(f"✅ تمت المزامنة بنجاح! تم تسجيل **{len(synced)}** أمر سلاش.\n💡 **مهم جداً:** قم بإغلاق تطبيق ديسكورد بالكامل من الخلفية وأعد فتحه لتشاهد الأوامر الجديدة.")
-    except Exception as e:
-        await ctx.send(f"❌ حدث خطأ أثناء المزامنة: {e}")
 
 # --- 1. أمر إنشاء الرول ---
 @bot.tree.command(name="create_role", description="أنشئ رولك الخاص لأنك بوستر!")
@@ -225,7 +207,7 @@ async def edit_role_icon(interaction: discord.Interaction, image: discord.Attach
     except Exception as e:
         await interaction.followup.send(f"حدث خطأ أثناء تعديل الأيقونة: {e}", ephemeral=True)
 
-# --- 6. أمر مشاركة الرول ---
+# --- 6. أمر مشاركة الرول مع 3 أشخاص كحد أقصى ---
 @bot.tree.command(name="share_role", description="شارك رولك المخصص مع صديق (الحد الأقصى 3 أشخاص)")
 @app_commands.describe(target_member="الشخص الذي تريد إعطائه رولك")
 async def share_role(interaction: discord.Interaction, target_member: discord.Member):
@@ -252,7 +234,7 @@ async def share_role(interaction: discord.Interaction, target_member: discord.Me
     else:
         await interaction.followup.send("حدث خطأ، لم يتم العثور على الرول الخاص بك.", ephemeral=True)
 
-# --- 7. أمر حذف شخص من الرول ---
+# --- 7. أمر حذف شخص من الرول وسحبه منه ---
 @bot.tree.command(name="remove_shared_member", description="إزالة صديق من الأشخاص الثلاثة المشاركين لرولك وسحب الرتبة منه")
 @app_commands.describe(target_member="العضو المراد إزالته وسحب رولك منه")
 async def remove_shared_member(interaction: discord.Interaction, target_member: discord.Member):
@@ -279,7 +261,7 @@ async def remove_shared_member(interaction: discord.Interaction, target_member: 
     else:
         await interaction.followup.send("لم يتم العثور على الرتبة المخصصة الخاصة بك في السيرفر.", ephemeral=True)
 
-# --- 8. فحص البوسترز التلقائي ---
+# --- 8. فحص البوسترز التلقائي كل 10 دقائق وحذف الرتب لمن انتهى البوست ---
 @tasks.loop(minutes=10)
 async def check_boosters():
     for guild in bot.guilds:
@@ -300,6 +282,6 @@ async def check_boosters():
                         print(f"خطأ أثناء حذف الرول: {e}")
                 booster_roles.pop(booster_id, None)
 
-# تشغيل البوت
+# تشغيل البوت عبر التوكن من Railway
 token = os.getenv("DISCORD_TOKEN")
 bot.run(token)
