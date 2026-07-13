@@ -12,7 +12,6 @@ class MyBot(commands.Bot):
         intents.members = True
         intents.guilds = True
         intents.message_content = True
-        # تم وضع البريفكس العادي ليكون ! لأمر المزامنة السري
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
@@ -21,21 +20,14 @@ class MyBot(commands.Bot):
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name} ({self.user.id})')
-        try:
-            # ربط الأوامر بسيرفرك الخاص مباشرة لتعمل فوراً
-            guild = discord.Object(id=YOUR_GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            print(f"Synced {len(synced)} command(s) instantly to guild {YOUR_GUILD_ID}")
-        except Exception as e:
-            print(f"Failed to sync commands: {e}")
+        # سنعتمد الآن على الأمر اليدوي !sync لضمان المزامنة القسرية وتجنب تعليق الكاش عند تشغيل البوت
 
 bot = MyBot()
 
 # قاعدة بيانات وهمية في الذاكرة للرولات المخصصة فقط
 booster_roles = {}
 
-# دالة مساعدة مطورة للتأكد من أن الشخص بوستر (تبحث عن رتبة البوست بأي اسم)
+# دالة مساعدة مطورة للتأكد من أن الشخص بوستر
 def is_booster(interaction: discord.Interaction) -> bool:
     member = interaction.user
     for role in member.roles:
@@ -43,20 +35,32 @@ def is_booster(interaction: discord.Interaction) -> bool:
             return True
     return False
 
-# --- أمر سري للمزامنة يدوياً بالرسائل العادية لتحديث كاش ديسكورد فوراً ---
-# فقط اكتب في أي شات بالسيرفر: !sync
+# --- أمر قوي جداً للمزامنة وتنظيف كاش ديسكورد ---
+# اكتب في الشات: !sync
 @bot.command(name="sync")
-@commands.is_owner() # للتأكد من أن صاحب البوت فقط من يستطيع استخدامه
 async def sync_commands(ctx):
+    # التأكد من أن منفذ الأمر هو صاحب السيرفر أو لديه صلاحيات الإدارة الكاملة
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ هذا الأمر مخصص للإدارة فقط!")
+        return
+
+    await ctx.send("⏳ جاري تنظيف الكاش وإعادة مزامنة الأوامر الثمانية بالكامل، يرجى الانتظار...")
     try:
         guild = discord.Object(id=YOUR_GUILD_ID)
+        
+        # 1. مسح الأوامر القديمة المسجلة محلياً في السيرفر أولاً لتنظيف الذاكرة
+        bot.tree.clear_commands(guild=guild)
+        await bot.tree.sync(guild=guild)
+        
+        # 2. نسخ الأوامر الجديدة وتسجيلها مجدداً
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
-        await ctx.send(f"✅ تم إجبار ديسكورد على مزامنة {len(synced)} أمر بنجاح! يرجى إغلاق تطبيق ديسكورد وفتحه الآن.")
+        
+        await ctx.send(f"✅ تمت المزامنة بنجاح! تم تسجيل **{len(synced)}** أمر سلاش.\n💡 **مهم جداً:** قم بإغلاق تطبيق ديسكورد بالكامل من الخلفية وأعد فتحه لتشاهد الأوامر الجديدة.")
     except Exception as e:
         await ctx.send(f"❌ حدث خطأ أثناء المزامنة: {e}")
 
-# --- 1. أمر إنشاء الرول المتتالي تحت البوت تلقائياً وبصمت ---
+# --- 1. أمر إنشاء الرول ---
 @bot.tree.command(name="create_role", description="أنشئ رولك الخاص لأنك بوستر!")
 @app_commands.describe(role_name="اسم الرول الجديد الخاص بك")
 async def create_role(interaction: discord.Interaction, role_name: str):
@@ -70,39 +74,27 @@ async def create_role(interaction: discord.Interaction, role_name: str):
         return
 
     guild = interaction.guild
-    # تأجيل الرد وجعل العملية مخفية بالكامل (لا يرى الرسالة إلا منفذ الأمر)
     await interaction.response.defer(ephemeral=True)
 
-    # إنشاء الرول
     try:
         new_role = await guild.create_role(name=role_name, reason=f"Booster custom role for {member.name}")
     except Exception as e:
         await interaction.followup.send("فشل إنشاء الرول. تأكد من إعطاء البوت صلاحية Manage Roles.", ephemeral=True)
         return
 
-    # إعطاء الرول لصاحبه فوراً
     await member.add_roles(new_role)
-    
-    # جلب رتبة البوت لرفع الرتبة الجديدة تحتها مباشرة
     bot_member = guild.get_member(bot.user.id)
     bot_top_role = bot_member.top_role
     
     try:
-        # نضع الرتبة الجديدة دائماً تحت رتبة البوت بمرتبة واحدة (Position - 1)
         await new_role.edit(position=max(1, bot_top_role.position - 1))
-        print(f"تم إنشاء وترتيب رول بنجاح وتحت البوت مباشرة للعضو: {member.name}")
-    except discord.Forbidden:
-        print("تنبيه: البوت لم يستطع تغيير الترتيب. يرجى سحب رتبة البوت إلى أعلى القائمة في إعدادات السيرفر.")
     except Exception as e:
         print(f"Error setting role position: {e}")
 
-    # حفظ الرول المخصص في الذاكرة للتحكم به لاحقاً وحذفه عند انتهاء البوست
     booster_roles[member.id] = {
         "role_id": new_role.id,
         "shared_with": []
     }
-    
-    # رسالة التأكيد تظهر للشخص فقط ومخفية عن باقي الأعضاء
     await interaction.followup.send(f"تم إنشاء رولك الخاص بنجاح وتم وضعه في الترتيب الصحيح تحت البوت!", ephemeral=True)
 
 # --- 2. أمر تعديل الاسم واللون العادي ---
@@ -130,7 +122,6 @@ async def edit_role(interaction: discord.Interaction, option: app_commands.Choic
     if option.value == "name":
         await role.edit(name=value)
         await interaction.followup.send(f"تم تغيير اسم الرول إلى: **{value}**", ephemeral=True)
-        
     elif option.value == "color":
         try:
             hex_color = value.lstrip('#')
@@ -141,7 +132,7 @@ async def edit_role(interaction: discord.Interaction, option: app_commands.Choic
         except Exception:
             await interaction.followup.send("صيغة اللون غير صحيحة. يرجى استخدام صيغة Hex مثل: `#ff0000`", ephemeral=True)
 
-# --- 3. أمر استخدام تدرجات الألوان الرسمية ثنائية اللون (Discord Role Gradients) ---
+# --- 3. أمر استخدام تدرجات الألوان الرسمية ثنائية اللون ---
 @bot.tree.command(name="gradient_role", description="اختر تدرجاً لونياً رسمياً (لونين معاً) لرولك الخاص!")
 @app_commands.choices(gradient=[
     app_commands.Choice(name="Neon Sunset (وردي مشع + بنفسجي عميق)", value="#ff007f|#4b0082"),
@@ -165,10 +156,7 @@ async def gradient_role(interaction: discord.Interaction, gradient: app_commands
 
     await interaction.response.defer(ephemeral=True)
     
-    # فصل اللونين عن بعضهما (Primary & Secondary)
     color1_hex, color2_hex = gradient.value.split('|')
-    
-    # تحويل الألوان إلى صيغة ديسكورد الرسمية
     rgb1 = tuple(int(color1_hex.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
     rgb2 = tuple(int(color2_hex.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
     
@@ -180,7 +168,7 @@ async def gradient_role(interaction: discord.Interaction, gradient: app_commands
         await interaction.followup.send(f"تم تطبيق التدرج اللوني الرسمي **{gradient.name}** بنجاح!", ephemeral=True)
     except discord.Forbidden:
         await interaction.followup.send("فشل تعديل الألوان. تأكد من رتبة البوت وصلاحياته في السيرفر.", ephemeral=True)
-    except Exception as e:
+    except Exception:
         await interaction.followup.send("تأكد أن سيرفرك يمتلك ليفل البوست المطلوب لتفعيل ميزة التدرج اللوني للرتب.", ephemeral=True)
 
 # --- 4. أمر حذف الرول الخاص بالكامل ---
@@ -237,7 +225,7 @@ async def edit_role_icon(interaction: discord.Interaction, image: discord.Attach
     except Exception as e:
         await interaction.followup.send(f"حدث خطأ أثناء تعديل الأيقونة: {e}", ephemeral=True)
 
-# --- 6. أمر مشاركة الرول مع 3 أشخاص كحد أقصى ---
+# --- 6. أمر مشاركة الرول ---
 @bot.tree.command(name="share_role", description="شارك رولك المخصص مع صديق (الحد الأقصى 3 أشخاص)")
 @app_commands.describe(target_member="الشخص الذي تريد إعطائه رولك")
 async def share_role(interaction: discord.Interaction, target_member: discord.Member):
@@ -247,11 +235,9 @@ async def share_role(interaction: discord.Interaction, target_member: discord.Me
         return
     
     role_info = booster_roles[member.id]
-    
     if len(role_info["shared_with"]) >= 3:
         await interaction.response.send_message("لقد وصلت للحد الأقصى لمشاركة الرول (3 أشخاص فقط).", ephemeral=True)
         return
-        
     if target_member.id in role_info["shared_with"] or target_member.id == member.id:
         await interaction.response.send_message("هذا الشخص لديه الرول بالفعل.", ephemeral=True)
         return
@@ -266,7 +252,7 @@ async def share_role(interaction: discord.Interaction, target_member: discord.Me
     else:
         await interaction.followup.send("حدث خطأ، لم يتم العثور على الرول الخاص بك.", ephemeral=True)
 
-# --- 7. أمر حذف شخص من الرول وسحبه منه ---
+# --- 7. أمر حذف شخص من الرول ---
 @bot.tree.command(name="remove_shared_member", description="إزالة صديق من الأشخاص الثلاثة المشاركين لرولك وسحب الرتبة منه")
 @app_commands.describe(target_member="العضو المراد إزالته وسحب رولك منه")
 async def remove_shared_member(interaction: discord.Interaction, target_member: discord.Member):
@@ -276,7 +262,6 @@ async def remove_shared_member(interaction: discord.Interaction, target_member: 
         return
         
     role_info = booster_roles[member.id]
-    
     if target_member.id not in role_info["shared_with"]:
         await interaction.response.send_message("هذا الشخص غير مضاف إلى رولك المخصص أصلاً.", ephemeral=True)
         return
@@ -294,31 +279,27 @@ async def remove_shared_member(interaction: discord.Interaction, target_member: 
     else:
         await interaction.followup.send("لم يتم العثور على الرتبة المخصصة الخاصة بك في السيرفر.", ephemeral=True)
 
-# --- 8. فحص البوسترز التلقائي كل 10 دقائق وحذف الرتب لمن انتهى البوست ---
+# --- 8. فحص البوسترز التلقائي ---
 @tasks.loop(minutes=10)
 async def check_boosters():
     for guild in bot.guilds:
         for booster_id, info in list(booster_roles.items()):
             member = guild.get_member(booster_id)
-            
             is_still_boosting = False
             if member:
                 for role in member.roles:
                     if "booster" in role.name.lower() or "boost" in role.name.lower() or role.is_premium_subscriber():
                         is_still_boosting = True
                         break
-            
             if not is_still_boosting:
                 role = guild.get_role(info["role_id"])
                 if role:
                     try:
                         await role.delete(reason="انتهت مدة البوست الخاصة بالعضو.")
-                        print(f"تم حذف الرول المخصص {info['role_id']} لانتهاء البوست.")
                     except Exception as e:
                         print(f"خطأ أثناء حذف الرول: {e}")
-                
                 booster_roles.pop(booster_id, None)
 
-# تشغيل البوت عبر التوكن من Railway
+# تشغيل البوت
 token = os.getenv("DISCORD_TOKEN")
 bot.run(token)
