@@ -12,6 +12,7 @@ class MyBot(commands.Bot):
         intents.members = True
         intents.guilds = True
         intents.message_content = True
+        # تم وضع البريفكس العادي ليكون ! لأمر المزامنة السري
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
@@ -41,6 +42,19 @@ def is_booster(interaction: discord.Interaction) -> bool:
         if "booster" in role.name.lower() or "boost" in role.name.lower() or role.is_premium_subscriber():
             return True
     return False
+
+# --- أمر سري للمزامنة يدوياً بالرسائل العادية لتحديث كاش ديسكورد فوراً ---
+# فقط اكتب في أي شات بالسيرفر: !sync
+@bot.command(name="sync")
+@commands.is_owner() # للتأكد من أن صاحب البوت فقط من يستطيع استخدامه
+async def sync_commands(ctx):
+    try:
+        guild = discord.Object(id=YOUR_GUILD_ID)
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        await ctx.send(f"✅ تم إجبار ديسكورد على مزامنة {len(synced)} أمر بنجاح! يرجى إغلاق تطبيق ديسكورد وفتحه الآن.")
+    except Exception as e:
+        await ctx.send(f"❌ حدث خطأ أثناء المزامنة: {e}")
 
 # --- 1. أمر إنشاء الرول المتتالي تحت البوت تلقائياً وبصمت ---
 @bot.tree.command(name="create_role", description="أنشئ رولك الخاص لأنك بوستر!")
@@ -75,7 +89,6 @@ async def create_role(interaction: discord.Interaction, role_name: str):
     
     try:
         # نضع الرتبة الجديدة دائماً تحت رتبة البوت بمرتبة واحدة (Position - 1)
-        # الرتب القديمة ستنزاح تلقائياً لأسفل لتصبح: تحت تحت البوت، وتحت تحت تحت البوت.. وهكذا إلى ما لا نهاية.
         await new_role.edit(position=max(1, bot_top_role.position - 1))
         print(f"تم إنشاء وترتيب رول بنجاح وتحت البوت مباشرة للعضو: {member.name}")
     except discord.Forbidden:
@@ -123,7 +136,6 @@ async def edit_role(interaction: discord.Interaction, option: app_commands.Choic
             hex_color = value.lstrip('#')
             rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
             discord_color = discord.Color.from_rgb(*rgb)
-            # عند تعديل لون عادي، نقوم بإلغاء التدرج اللوني إذا كان مفصلاً مسبقاً
             await role.edit(color=discord_color, primary_color=None, secondary_color=None)
             await interaction.followup.send("تم تغيير لون الرول بنجاح!", ephemeral=True)
         except Exception:
@@ -164,13 +176,12 @@ async def gradient_role(interaction: discord.Interaction, gradient: app_commands
     secondary_color = discord.Color.from_rgb(*rgb2)
     
     try:
-        # استخدام الخواص الرسمية للرتب التدرجية في مكتبة ديسكورد
         await role.edit(primary_color=primary_color, secondary_color=secondary_color)
         await interaction.followup.send(f"تم تطبيق التدرج اللوني الرسمي **{gradient.name}** بنجاح!", ephemeral=True)
     except discord.Forbidden:
         await interaction.followup.send("فشل تعديل الألوان. تأكد من رتبة البوت وصلاحياته في السيرفر.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send("تأكد أن سيرفرك يمتلك ليفل البوست المطلوب (مستوى 2 أو أكثر) لتفعيل ميزة التدرج اللوني للرتب.", ephemeral=True)
+        await interaction.followup.send("تأكد أن سيرفرك يمتلك ليفل البوست المطلوب لتفعيل ميزة التدرج اللوني للرتب.", ephemeral=True)
 
 # --- 4. أمر حذف الرول الخاص بالكامل ---
 @bot.tree.command(name="delete_role", description="حذف رولك الخاص نهائياً من السيرفر")
@@ -193,7 +204,6 @@ async def delete_role(interaction: discord.Interaction):
     else:
         await interaction.followup.send("تمت إزالة السجل، لم يُعثر على الرول بالفعل في قائمة رتب السيرفر.", ephemeral=True)
         
-    # حذف الرول من قاعدة بيانات البوت في الذاكرة في كل الأحوال
     booster_roles.pop(member.id, None)
 
 # --- 5. أمر تعديل الأيقونة بالرفع المباشر ---
@@ -267,7 +277,6 @@ async def remove_shared_member(interaction: discord.Interaction, target_member: 
         
     role_info = booster_roles[member.id]
     
-    # التأكد من أن الشخص المطلوب إزالته موجود فعلاً في القائمة المضافة
     if target_member.id not in role_info["shared_with"]:
         await interaction.response.send_message("هذا الشخص غير مضاف إلى رولك المخصص أصلاً.", ephemeral=True)
         return
@@ -277,9 +286,7 @@ async def remove_shared_member(interaction: discord.Interaction, target_member: 
     
     if role:
         try:
-            # سحب الرتبة من الشخص
             await target_member.remove_roles(role, reason=f"تمت إزالته من قبل صاحب الرول: {member.name}")
-            # حذفه من مصفوفة المشاركين في الذاكرة للبوت
             role_info["shared_with"].remove(target_member.id)
             await interaction.followup.send(f"تم سحب رولك الخاص من العضو {target_member.mention} بنجاح وحذفه من قائمتك!", ephemeral=True)
         except Exception as e:
