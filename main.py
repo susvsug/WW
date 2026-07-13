@@ -17,7 +17,7 @@ class MyBot(commands.Bot):
     async def on_ready(self):
         print(f'Logged in as {self.user.name} ({self.user.id})')
         try:
-            # مزامنة ذكية تلقائية لكل السيرفرات التي يتواجد بها البوت حالياً دون الحاجة لكتابة ID
+            # مزامنة تلقائية وذكية لجميع السيرفرات المتواجد بها البوت
             for guild in self.guilds:
                 self.tree.copy_global_to(guild=guild)
                 synced = await self.tree.sync(guild=guild)
@@ -43,7 +43,7 @@ def is_booster(interaction: discord.Interaction) -> bool:
 @app_commands.describe(role_name="اسم الرول الجديد الخاص بك")
 async def create_role(interaction: discord.Interaction, role_name: str):
     if not is_booster(interaction):
-        await interaction.response.send_message("عذراً، هذا الأمر مخصص لداعمي السيرفر (Server Booster) فقط!", ephemeral=True)
+        await interaction.response.send_message("عذراً، this command is for Server Boosters only!", ephemeral=True)
         return
 
     member = interaction.user
@@ -119,7 +119,46 @@ async def edit_color(interaction: discord.Interaction, hex_code: str):
     else:
         await interaction.followup.send("لم يتم العثور على الرول الخاص بك.", ephemeral=True)
 
-# --- 4. أمر حذف الرول الخاص ---
+# --- 4. أمر إضافة/تعديل أيقونة الرول عن طريق رفع صورة (المطلوب 🌟) ---
+@bot.tree.command(name="edit_icon", description="تغيير أيقونة رولك المخصص عن طريق رفع صورة")
+@app_commands.describe(image="ارفع الصورة التي تريد استخدامها كأيقونة للرول (PNG أو JPG)")
+async def edit_icon(interaction: discord.Interaction, image: discord.Attachment):
+    member = interaction.user
+    if member.id not in booster_roles:
+        await interaction.response.send_message("لا تملك رول خاص بالبوست لتعديله.", ephemeral=True)
+        return
+    
+    # التأكد من أن الملف المرفوع هو صورة بالفعل
+    if not image.content_type or not image.content_type.startswith("image/"):
+        await interaction.response.send_message("يرجى رفع ملف صوري فقط (PNG, JPG, JPEG).", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    
+    role_info = booster_roles[member.id]
+    role = interaction.guild.get_role(role_info["role_id"])
+    
+    if not role:
+        await interaction.followup.send("لم يتم العثور على الرول الخاص بك في قائمة السيرفر.", ephemeral=True)
+        return
+
+    try:
+        # قراءة الصورة المرفوعة كمصفوفة بايتات وتمريرها للدوال الخاصة بديسكورد
+        icon_bytes = await image.read()
+        await role.edit(display_icon=icon_bytes)
+        await interaction.followup.send("تم تعيين أيقونة الرول الخاصة بك بنجاح! 🎉", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.followup.send("فشل تعديل الأيقونة. تأكد من أن البوت لديه صلاحية 'Manage Roles' وأن رتبته فوق رتبتك.", ephemeral=True)
+    except discord.HTTPException as e:
+        # هذه الرسالة تظهر غالباً في السيرفرات التي لم تصل للمستوى المطلوبة لتفعيل الأيقونات
+        if e.code == 50035:
+            await interaction.followup.send("عذراً، ميزة أيقونات الرتب تتطلب أن يكون السيرفر حاصلاً على Boost Level 2 على الأقل في ديسكورد.", ephemeral=True)
+        else:
+            await interaction.followup.send(f"حدث خطأ من طرف ديسكورد أثناء تعديل الأيقونة: {e}", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"حدث خطأ غير متوقع: {e}", ephemeral=True)
+
+# --- 5. أمر حذف الرول الخاص ---
 @bot.tree.command(name="delete_role", description="حذف رولك الخاص نهائياً من السيرفر")
 async def delete_role(interaction: discord.Interaction):
     member = interaction.user
@@ -142,7 +181,7 @@ async def delete_role(interaction: discord.Interaction):
         
     booster_roles.pop(member.id, None)
 
-# --- 5. أمر مشاركة الرول مع صديق ---
+# --- 6. أمر مشاركة الرول مع صديق ---
 @bot.tree.command(name="share_role", description="شارك رولك المخصص مع صديق (الحد الأقصى 3 أشخاص)")
 @app_commands.describe(target_member="الشخص الذي تريد إعطائه رولك")
 async def share_role(interaction: discord.Interaction, target_member: discord.Member):
@@ -169,7 +208,7 @@ async def share_role(interaction: discord.Interaction, target_member: discord.Me
     else:
         await interaction.followup.send("لم يتم العثور على الرول الخاص بك.", ephemeral=True)
 
-# --- 6. أمر حذف صديق من الرول ---
+# --- 7. أمر حذف صديق من الرول ---
 @bot.tree.command(name="remove_member", description="إزالة صديق من رولك الخاص وسحب الرتبة منه")
 @app_commands.describe(target_member="العضو المراد إزالته وسحب رولك منه")
 async def remove_member(interaction: discord.Interaction, target_member: discord.Member):
@@ -196,7 +235,7 @@ async def remove_member(interaction: discord.Interaction, target_member: discord
     else:
         await interaction.followup.send("لم يتم العثور على الرتبة المخصصة الخاصة بك.", ephemeral=True)
 
-# --- 7. فحص البوسترز التلقائي ---
+# --- 8. فحص البوسترز التلقائي ---
 @tasks.loop(minutes=10)
 async def check_boosters():
     for guild in bot.guilds:
