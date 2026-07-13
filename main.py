@@ -3,9 +3,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-# آي دي السيرفر الخاص بك لتظهر الأوامر فوراً فيه
-YOUR_GUILD_ID = 1510521767423246486  # تأكد من مطابقة هذا الرقم لآي دي سيرفرك الحالي
-
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -15,17 +12,16 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # بدء مهمة فحص البوسترز التلقائية
         check_boosters.start()
 
     async def on_ready(self):
         print(f'Logged in as {self.user.name} ({self.user.id})')
         try:
-            # مزامنة ذكية ومباشرة للسيرفر الخاص بك فور تشغيل البوت
-            guild = discord.Object(id=YOUR_GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            print(f"✅ Synced {len(synced)} commands successfully to guild {YOUR_GUILD_ID}")
+            # مزامنة ذكية تلقائية لكل السيرفرات التي يتواجد بها البوت حالياً دون الحاجة لكتابة ID
+            for guild in self.guilds:
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                print(f"✅ Synced {len(synced)} commands successfully to: {guild.name} ({guild.id})")
         except Exception as e:
             print(f"❌ Failed to sync: {e}")
 
