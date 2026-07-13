@@ -31,7 +31,7 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-# قاعدة بيانات وهمية في الذاكرة للرولات المخصصة
+# قاعدة بيانات وهمية في الذاكرة للرولات المخصصة فقط
 booster_roles = {}
 
 # دالة مساعدة للتأكد من أن الشخص بوستر
@@ -44,7 +44,7 @@ def is_booster(interaction: discord.Interaction) -> bool:
 @app_commands.describe(role_name="اسم الرول الجديد الخاص بك")
 async def create_role(interaction: discord.Interaction, role_name: str):
     if not is_booster(interaction):
-        await interaction.response.send_message("عذراً، هذا الأمر مخصص لداعمي السيرفر (Server Booster) فقط!", ephemeral=True)
+        await interaction.response.send_message("عذراً، this command is for Server Boosters only!", ephemeral=True)
         return
 
     member = interaction.user
@@ -69,6 +69,7 @@ async def create_role(interaction: discord.Interaction, role_name: str):
     # إعطاء الرول لصاحبه
     await member.add_roles(new_role)
     
+    # حفظ الرول المخصص فقط في الذاكرة للتحكم به لاحقاً
     booster_roles[member.id] = {
         "role_id": new_role.id,
         "shared_with": []
@@ -172,25 +173,28 @@ async def share_role(interaction: discord.Interaction, target_member: discord.Me
     else:
         await interaction.followup.send("حدث خطأ، لم يتم العثور على الرول الخاص بك.")
 
-# --- 5. فحص البوسترز التلقائي كل 10 دقائق وحذف الرتب ---
+# --- 5. فحص البوسترز التلقائي (يفحص الرتب المبرمجة فقط) ---
 @tasks.loop(minutes=10)
 async def check_boosters():
     for guild in bot.guilds:
+        # هنا السكربت يدخل فقط على الرتب المخزنة في قائمة البوت (booster_roles)
         for booster_id, info in list(booster_roles.items()):
             member = guild.get_member(booster_id)
             
-            # التحقق هل العضو ما زال موجوداً ويملك رتبة البوستر؟
+            # التحقق هل العضو ما زال يملك رتبة البوستر الافتراضية للسيرفر؟
             is_still_boosting = member and any(r.name == "Server Booster" for r in member.roles)
             
             if not is_still_boosting:
+                # جلب الرتبة المحددة المخزنة بالـ ID الخاص بها فقط لضمان الأمان التام
                 role = guild.get_role(info["role_id"])
                 if role:
                     try:
                         await role.delete(reason="انتهت مدة البوست الخاصة بالعضو.")
-                        print(f"تم حذف رول العضو {booster_id} لانتهاء البوست.")
+                        print(f"تم حذف الرول المخصص {info['role_id']} للعضو {booster_id} لانتهاء البوست.")
                     except Exception as e:
                         print(f"خطأ أثناء حذف الرول: {e}")
                 
+                # إزالتها من الذاكرة لعدم تكرار المحاولة
                 booster_roles.pop(booster_id, None)
 
 # تشغيل البوت عبر التوكن من Railway
