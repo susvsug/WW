@@ -3,8 +3,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-# آي دي السيرفر الخاص بك لتظهر الأوامر فوراً فيه
-YOUR_GUILD_ID = 1497416874173141135
+# آي دي السيرفر الجديد الخاص بك لتظهر الأوامر فوراً فيه
+YOUR_GUILD_ID = 1497511041813450902
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -34,17 +34,21 @@ bot = MyBot()
 # قاعدة بيانات وهمية في الذاكرة للرولات المخصصة فقط
 booster_roles = {}
 
-# دالة مساعدة للتأكد من أن الشخص بوستر
+# دالة مساعدة مطورة للتأكد من أن الشخص بوستر (تبحث عن رتبة البوست بأي اسم)
 def is_booster(interaction: discord.Interaction) -> bool:
     member = interaction.user
-    return any(role.name == "Server Booster" for role in member.roles)
+    for role in member.roles:
+        # فحص الرتبة الافتراضية أو أي رتبة تحتوي على كلمة بوستر بالإنجليزية أو رتبة البوست الأصلية من ديسكورد
+        if "booster" in role.name.lower() or "boost" in role.name.lower() or role.is_premium_subscriber():
+            return True
+    return False
 
 # --- 1. أمر إنشاء الرول ---
 @bot.tree.command(name="create_role", description="أنشئ رولك الخاص لأنك بوستر!")
 @app_commands.describe(role_name="اسم الرول الجديد الخاص بك")
 async def create_role(interaction: discord.Interaction, role_name: str):
     if not is_booster(interaction):
-        await interaction.response.send_message("عذراً، this command is for Server Boosters only!", ephemeral=True)
+        await interaction.response.send_message("عذراً، هذا الأمر مخصص لداعمي السيرفر (Server Booster) فقط!", ephemeral=True)
         return
 
     member = interaction.user
@@ -177,12 +181,16 @@ async def share_role(interaction: discord.Interaction, target_member: discord.Me
 @tasks.loop(minutes=10)
 async def check_boosters():
     for guild in bot.guilds:
-        # هنا السكربت يدخل فقط على الرتب المخزنة في قائمة البوت (booster_roles)
         for booster_id, info in list(booster_roles.items()):
             member = guild.get_member(booster_id)
             
-            # التحقق هل العضو ما زال يملك رتبة البوستر الافتراضية للسيرفر؟
-            is_still_boosting = member and any(r.name == "Server Booster" for r in member.roles)
+            # التحقق هل العضو ما زال يملك رتبة البوستر؟
+            is_still_boosting = False
+            if member:
+                for role in member.roles:
+                    if "booster" in role.name.lower() or "boost" in role.name.lower() or role.is_premium_subscriber():
+                        is_still_boosting = True
+                        break
             
             if not is_still_boosting:
                 # جلب الرتبة المحددة المخزنة بالـ ID الخاص بها فقط لضمان الأمان التام
