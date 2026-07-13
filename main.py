@@ -17,7 +17,7 @@ class MyBot(commands.Bot):
     async def on_ready(self):
         print(f'Logged in as {self.user.name} ({self.user.id})')
         try:
-            # مزامنة تلقائية وذكية لجميع السيرفرات المتواجد بها البوت
+            # مزامنة تلقائية لجميع السيرفرات دون الحاجة لـ ID
             for guild in self.guilds:
                 self.tree.copy_global_to(guild=guild)
                 synced = await self.tree.sync(guild=guild)
@@ -27,7 +27,7 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-# قاعدة بيانات وهمية في الذاكرة للرولات المخصصة فقط
+# قاعدة بيانات وهمية في الذاكرة للرولات المخصصة
 booster_roles = {}
 
 # دالة مساعدة للتأكد من أن الشخص بوستر
@@ -38,12 +38,12 @@ def is_booster(interaction: discord.Interaction) -> bool:
             return True
     return False
 
-# --- 1. أمر إنشاء الرول ---
+# --- 1. أمر إنشاء الرول (فوق رتبة البوستر مباشرة) ---
 @bot.tree.command(name="create_role", description="أنشئ رولك الخاص لأنك بوستر!")
 @app_commands.describe(role_name="اسم الرول الجديد الخاص بك")
 async def create_role(interaction: discord.Interaction, role_name: str):
     if not is_booster(interaction):
-        await interaction.response.send_message("عذراً، this command is for Server Boosters only!", ephemeral=True)
+        await interaction.response.send_message("عذراً، هذا الأمر مخصص لداعمي السيرفر (Server Booster) فقط!", ephemeral=True)
         return
 
     member = interaction.user
@@ -60,22 +60,69 @@ async def create_role(interaction: discord.Interaction, role_name: str):
         await interaction.followup.send("فشل إنشاء الرول. تأكد من إعطاء البوت صلاحية Manage Roles.", ephemeral=True)
         return
 
+    # إعطاء الرول للعضو
     await member.add_roles(new_role)
-    bot_member = guild.get_member(bot.user.id)
-    bot_top_role = bot_member.top_role
-    
+
+    # البحث عن رتبة البوستر الأساسية بالسيرفر لرفع الرول فوقها
+    booster_role = None
+    for r in guild.roles:
+        if r.is_premium_subscriber():
+            booster_role = r
+            break
+
+    if not booster_role:
+        for r in guild.roles:
+            if "booster" in r.name.lower() or "boost" in r.name.lower() or "داعم" in r.name:
+                booster_role = r
+                break
+
     try:
-        await new_role.edit(position=max(1, bot_top_role.position - 1))
+        bot_member = guild.get_member(bot.user.id)
+        if booster_role:
+            target_position = booster_role.position + 1
+            # حماية لكي لا يتعدى الرول رتبة البوت نفسه
+            if target_position >= bot_member.top_role.position:
+                target_position = max(1, bot_member.top_role.position - 1)
+                
+            await new_role.edit(position=target_position)
+            print(f"Moved role above booster role to position {target_position}")
+        else:
+            target_position = max(1, bot_member.top_role.position - 1)
+            await new_role.edit(position=target_position)
     except Exception as e:
-        print(f"Error setting role position: {e}")
+        print(f"Failed to move role position: {e}")
 
     booster_roles[member.id] = {
         "role_id": new_role.id,
         "shared_with": []
     }
-    await interaction.followup.send(f"تم إنشاء رولك الخاص بنجاح وتم وضعه في الترتيب الصحيح تحت البوت!", ephemeral=True)
+    await interaction.followup.send(f"تم إنشاء رولك الخاص بنجاح ووضعه فوق رتبة البوستر! 🎉", ephemeral=True)
 
-# --- 2. أمر تعديل الاسم ---
+# --- 2. أمر حذف الرول الخاص (المطلوب ⚠️) ---
+@bot.tree.command(name="delete_role", description="حذف رولك الخاص نهائياً من السيرفر")
+async def delete_role(interaction: discord.Interaction):
+    member = interaction.user
+    if member.id not in booster_roles:
+        await interaction.response.send_message("لا تملك رولاً مخصصاً لتقوم بحذفه.", ephemeral=True)
+        return
+        
+    await interaction.response.defer(ephemeral=True)
+    role_info = booster_roles[member.id]
+    role = interaction.guild.get_role(role_info["role_id"])
+    
+    if role:
+        try:
+            await role.delete(reason="حذف بطلب من صاحب الرتبة")
+            await interaction.followup.send("تم حذف رولك المخصص بنجاح من السيرفر!", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"فشل حذف الرتبة من السيرفر: {e}", ephemeral=True)
+    else:
+        await interaction.followup.send("لم يُعثر على الرول في قائمة رتب السيرفر (قد يكون حُذف يدوياً).", ephemeral=True)
+        
+    # إزالة السجل من ذاكرة البوت في كل الحالات
+    booster_roles.pop(member.id, None)
+
+# --- 3. أمر تعديل الاسم ---
 @bot.tree.command(name="edit_name", description="تغيير اسم رولك الخاص")
 @app_commands.describe(new_name="الاسم الجديد للرول")
 async def edit_name(interaction: discord.Interaction, new_name: str):
@@ -94,7 +141,7 @@ async def edit_name(interaction: discord.Interaction, new_name: str):
     else:
         await interaction.followup.send("لم يتم العثور على الرول الخاص بك.", ephemeral=True)
 
-# --- 3. أمر تغيير اللون ---
+# --- 4. أمر تغيير اللون ---
 @bot.tree.command(name="edit_color", description="تغيير لون رولك الخاص باستخدام كود هيكس (Hex Color)")
 @app_commands.describe(hex_code="كود اللون الهكس (مثال: #ff0000 للون الأحمر)")
 async def edit_color(interaction: discord.Interaction, hex_code: str):
@@ -119,7 +166,7 @@ async def edit_color(interaction: discord.Interaction, hex_code: str):
     else:
         await interaction.followup.send("لم يتم العثور على الرول الخاص بك.", ephemeral=True)
 
-# --- 4. أمر إضافة/تعديل أيقونة الرول عن طريق رفع صورة (المطلوب 🌟) ---
+# --- 5. أمر تعديل الأيقونة ---
 @bot.tree.command(name="edit_icon", description="تغيير أيقونة رولك المخصص عن طريق رفع صورة")
 @app_commands.describe(image="ارفع الصورة التي تريد استخدامها كأيقونة للرول (PNG أو JPG)")
 async def edit_icon(interaction: discord.Interaction, image: discord.Attachment):
@@ -128,58 +175,31 @@ async def edit_icon(interaction: discord.Interaction, image: discord.Attachment)
         await interaction.response.send_message("لا تملك رول خاص بالبوست لتعديله.", ephemeral=True)
         return
     
-    # التأكد من أن الملف المرفوع هو صورة بالفعل
     if not image.content_type or not image.content_type.startswith("image/"):
         await interaction.response.send_message("يرجى رفع ملف صوري فقط (PNG, JPG, JPEG).", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
-    
     role_info = booster_roles[member.id]
     role = interaction.guild.get_role(role_info["role_id"])
     
     if not role:
-        await interaction.followup.send("لم يتم العثور على الرول الخاص بك في قائمة السيرفر.", ephemeral=True)
+        await interaction.followup.send("لم يتم العثور على الرول الخاص بك.", ephemeral=True)
         return
 
     try:
-        # قراءة الصورة المرفوعة كمصفوفة بايتات وتمريرها للدوال الخاصة بديسكورد
         icon_bytes = await image.read()
         await role.edit(display_icon=icon_bytes)
         await interaction.followup.send("تم تعيين أيقونة الرول الخاصة بك بنجاح! 🎉", ephemeral=True)
     except discord.Forbidden:
-        await interaction.followup.send("فشل تعديل الأيقونة. تأكد من أن البوت لديه صلاحية 'Manage Roles' وأن رتبته فوق رتبتك.", ephemeral=True)
+        await interaction.followup.send("فشل تعديل الأيقونة. تأكد من إعطاء البوت صلاحية إدارة الرتب ورفع ترتيب رتبته.", ephemeral=True)
     except discord.HTTPException as e:
-        # هذه الرسالة تظهر غالباً في السيرفرات التي لم تصل للمستوى المطلوبة لتفعيل الأيقونات
         if e.code == 50035:
-            await interaction.followup.send("عذراً، ميزة أيقونات الرتب تتطلب أن يكون السيرفر حاصلاً على Boost Level 2 على الأقل في ديسكورد.", ephemeral=True)
+            await interaction.followup.send("عذراً، ميزة أيقونات الرتب تتطلب أن يكون السيرفر حاصلاً على Boost Level 2 في ديسكورد.", ephemeral=True)
         else:
             await interaction.followup.send(f"حدث خطأ من طرف ديسكورد أثناء تعديل الأيقونة: {e}", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"حدث خطأ غير متوقع: {e}", ephemeral=True)
-
-# --- 5. أمر حذف الرول الخاص ---
-@bot.tree.command(name="delete_role", description="حذف رولك الخاص نهائياً من السيرفر")
-async def delete_role(interaction: discord.Interaction):
-    member = interaction.user
-    if member.id not in booster_roles:
-        await interaction.response.send_message("لا تملك رولاً مخصصاً لتقوم بحذفه.", ephemeral=True)
-        return
-        
-    await interaction.response.defer(ephemeral=True)
-    role_info = booster_roles[member.id]
-    role = interaction.guild.get_role(role_info["role_id"])
-    
-    if role:
-        try:
-            await role.delete(reason="حذف بطلب من صاحب الرتبة")
-            await interaction.followup.send("تم حذف رولك المخصص بنجاح!", ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"فشل حذف الرتبة: {e}", ephemeral=True)
-    else:
-        await interaction.followup.send("لم يُعثر على الرول في السيرفر.", ephemeral=True)
-        
-    booster_roles.pop(member.id, None)
 
 # --- 6. أمر مشاركة الرول مع صديق ---
 @bot.tree.command(name="share_role", description="شارك رولك المخصص مع صديق (الحد الأقصى 3 أشخاص)")
