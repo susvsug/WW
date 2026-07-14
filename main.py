@@ -38,7 +38,7 @@ def is_booster(interaction: discord.Interaction) -> bool:
             return True
     return False
 
-# --- 1. أمر إنشاء الرول (فوق رتبة البوستر مباشرة) ---
+# --- 1. أمر إنشاء الرول (محدث بطريقة الترتيب القسري المستقر) ---
 @bot.tree.command(name="create_role", description="أنشئ رولك الخاص لأنك بوستر!")
 @app_commands.describe(role_name="اسم الرول الجديد الخاص بك")
 async def create_role(interaction: discord.Interaction, role_name: str):
@@ -55,15 +55,16 @@ async def create_role(interaction: discord.Interaction, role_name: str):
     await interaction.response.defer(ephemeral=True)
 
     try:
+        # إنشاء الرول
         new_role = await guild.create_role(name=role_name, reason=f"Booster custom role for {member.name}")
     except Exception as e:
         await interaction.followup.send("فشل إنشاء الرول. تأكد من إعطاء البوت صلاحية Manage Roles.", ephemeral=True)
         return
 
-    # إعطاء الرول للعضو
+    # إعطاء الرول للعضو أولاً
     await member.add_roles(new_role)
 
-    # البحث عن رتبة البوستر الأساسية بالسيرفر لرفع الرول فوقها
+    # البحث عن رتبة البوستر الرسمية بالسيرفر لرفع الرول فوقها
     booster_role = None
     for r in guild.roles:
         if r.is_premium_subscriber():
@@ -76,21 +77,32 @@ async def create_role(interaction: discord.Interaction, role_name: str):
                 booster_role = r
                 break
 
+    # عملية الترتيب القسري الجديدة والمستقرة
     try:
         bot_member = guild.get_member(bot.user.id)
+        bot_top_role = bot_member.top_role
+
         if booster_role:
+            # تحديد الموقع المستهدف (فوق رتبة البوستر مباشرة)
             target_position = booster_role.position + 1
-            # حماية لكي لا يتعدى الرول رتبة البوت نفسه
-            if target_position >= bot_member.top_role.position:
-                target_position = max(1, bot_member.top_role.position - 1)
-                
-            await new_role.edit(position=target_position)
-            print(f"Moved role above booster role to position {target_position}")
+            
+            # التأكد برمجياً أن الموقع ليس مساوياً أو أعلى من رتبة البوت نفسه لتفادي حظر ديسكورد
+            if target_position >= bot_top_role.position:
+                target_position = max(1, bot_top_role.position - 1)
+            
+            # استخدام ميزة reorder_roles لضمان استجابة ديسكورد الفورية للترتيب
+            positions = {new_role: target_position}
+            await guild.reorder_roles(positions, reason="إعادة ترتيب رول البوستر الجديد تلقائياً")
+            print(f"✅ Reordered: Role {role_name} successfully moved to position {target_position}")
         else:
-            target_position = max(1, bot_member.top_role.position - 1)
-            await new_role.edit(position=target_position)
+            # في حال لم يجد رتبة البوستر، يضعها تحت رتبة البوت بمرتبة واحدة
+            target_position = max(1, bot_top_role.position - 1)
+            positions = {new_role: target_position}
+            await guild.reorder_roles(positions, reason="إعادة ترتيب رول البوستر الجديد تلقائياً")
+            print(f"⚠️ No booster role found. Moved under bot to position {target_position}")
+            
     except Exception as e:
-        print(f"Failed to move role position: {e}")
+        print(f"❌ Failed to automatically move role position: {e}")
 
     booster_roles[member.id] = {
         "role_id": new_role.id,
@@ -98,7 +110,7 @@ async def create_role(interaction: discord.Interaction, role_name: str):
     }
     await interaction.followup.send(f"تم إنشاء رولك الخاص بنجاح ووضعه فوق رتبة البوستر! 🎉", ephemeral=True)
 
-# --- 2. أمر حذف الرول الخاص (المطلوب ⚠️) ---
+# --- 2. أمر حذف الرول الخاص ---
 @bot.tree.command(name="delete_role", description="حذف رولك الخاص نهائياً من السيرفر")
 async def delete_role(interaction: discord.Interaction):
     member = interaction.user
@@ -119,7 +131,6 @@ async def delete_role(interaction: discord.Interaction):
     else:
         await interaction.followup.send("لم يُعثر على الرول في قائمة رتب السيرفر (قد يكون حُذف يدوياً).", ephemeral=True)
         
-    # إزالة السجل من ذاكرة البوت في كل الحالات
     booster_roles.pop(member.id, None)
 
 # --- 3. أمر تعديل الاسم ---
